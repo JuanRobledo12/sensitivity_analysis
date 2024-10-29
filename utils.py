@@ -3,12 +3,22 @@ import os
 
 class GenerateSensitivityAnalysisData:
 
-    def __init__(self, experiment_data_path):
+    def __init__(self, experiment_data_path, time_period):
         '''
         Inits with the path where the input_data and output_data folders are stored.
         Inside this folders the input and output csv files must be stored.
         '''
         self.experiment_data_path = experiment_data_path
+        self.period_id = time_period
+    
+    def check_null_values(self, df):
+        '''
+        Checks for columns with null values
+        '''
+        null_columns = df.columns[df.isnull().any()].tolist()
+        print('The following columns have null values: \n', null_columns)
+        df_without_null = df.dropna(axis=1, how='any')
+        return df_without_null
 
     def get_csv_names_list(self, file_type='input_data'):
         '''
@@ -67,11 +77,11 @@ class GenerateSensitivityAnalysisData:
         subsector_column_names = [i for i in df.columns if i.startswith('emission_co2e_subsector')]
         return subsector_column_names
     
-    def get_row_zero_df(self, dfs_list):
+    def get_row_df(self, dfs_list):
         '''
-        Creates a dataframe from a list of dataframes where only the first row is concatenated
+        Creates a dataframe from a list of dataframes where only the first ith row is concatenated
         '''
-        row_zero_df = pd.concat([df.iloc[0] for df in dfs_list], axis=1).T
+        row_zero_df = pd.concat([df.iloc[self.period_id] for df in dfs_list], axis=1).T
         row_zero_df.reset_index(drop=True, inplace=True)
         return row_zero_df
     
@@ -84,11 +94,18 @@ class GenerateSensitivityAnalysisData:
         # generate a list of input dfs and a list output dfs
         input_dfs, output_dfs = self.get_dfs_lists()
 
-        input_row_zero_df = self.get_row_zero_df(input_dfs)
-        output_row_zero_df = self.get_row_zero_df(output_dfs)
+        # Create a df from specific rows
+        input_row_zero_df = self.get_row_df(input_dfs)
+        output_row_zero_df = self.get_row_df(output_dfs)
 
+        # Concatenate indepentend and dependent variables in a df
         output_df = pd.concat([input_row_zero_df, output_row_zero_df], axis=1)
-        output_df.to_csv('sensitivity_analysis_data/iran_sensitivity_analysis_raw.csv', index=False)
+
+        # Check and remove null values
+        output_df_clean = self.check_null_values(output_df)
+
+        # Save it to csv
+        output_df_clean.to_csv('sensitivity_analysis_data/iran_sensitivity_analysis_raw.csv', index=False)
         
         return output_df
 
