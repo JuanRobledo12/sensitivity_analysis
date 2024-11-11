@@ -11,14 +11,23 @@ class GenerateSensitivityAnalysisData:
         self.experiment_data_path = experiment_data_path
         self.period_id = time_period
     
-    def check_null_values(self, df):
+    def check_null_values(self, df, return_null_value_df=False):
         '''
         Checks for columns with null values
         '''
-        null_columns = df.columns[df.isnull().any()].tolist()
-        print('The following columns have null values: \n', null_columns)
-        df_without_null = df.dropna(axis=1, how='any')
-        return df_without_null
+        null_columns = df.columns[df.isnull().all()].tolist()
+        if not null_columns:
+            print('There is not a single col with all null values')
+        else:
+            print('The following columns are full of null values: \n', null_columns)
+        
+        if return_null_value_df:
+            null_value_df = df[null_columns]
+            return null_value_df
+        else:
+            df_without_null = df.dropna(axis=1, how='all')
+            print('Cols with all null values have been removed')
+            return df_without_null
 
     def get_csv_names_list(self, file_type='input_data'):
         '''
@@ -40,7 +49,9 @@ class GenerateSensitivityAnalysisData:
         df = pd.read_csv(os.path.join(self.experiment_data_path, file_type, file_name))
 
         if file_type == 'output_data':
-            df = df[[i for i in df.columns if i.startswith('emission_co2e_subsector')]]
+            df = df[[i for i in df.columns if (i.startswith('emission_co2e_subsector')) or i == 'primary_id']]
+            df = df[df.primary_id == 0]
+            df = df.drop(columns='primary_id')
 
         return df
  
@@ -53,6 +64,9 @@ class GenerateSensitivityAnalysisData:
         # First we generate the input and output csv files lists
         input_csvs = self.get_csv_names_list('input_data')
         output_csvs = self.get_csv_names_list('output_data')
+
+        if len(input_csvs) != len(output_csvs):
+            raise ValueError("The amount of input files does not match the amount of output files.")
 
         input_dfs = []
         output_dfs = []
@@ -89,7 +103,7 @@ class GenerateSensitivityAnalysisData:
     
     def create_CSVs_for_sensitivity_analysis(self):
         '''
-        This creates csv files where the target variable is each subsector's CO2 emissions
+        This returns a df where the target variable is each subsector's CO2 emissions
         '''
         # generate a list of input dfs and a list output dfs
         input_dfs, output_dfs = self.get_dfs_lists()
@@ -103,10 +117,7 @@ class GenerateSensitivityAnalysisData:
 
         # Check and remove null values
         output_df_clean = self.check_null_values(output_df)
-
-        # Save it to csv
-        output_df_clean.to_csv('sensitivity_analysis_data/iran_sensitivity_analysis_raw.csv', index=False)
         
-        return output_df
+        return output_df_clean
 
         
