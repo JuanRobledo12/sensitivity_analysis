@@ -9,7 +9,7 @@ from sklearn.feature_selection import SelectFromModel
 import numpy as np
 import matplotlib.pyplot as plt
 
-class HelperFunctions:
+class EDAHelperFunctions:
 
     def __init__(self) -> None:
         pass
@@ -29,18 +29,36 @@ class HelperFunctions:
     
     def check_cols_with_same_val(self, df):
         """
-        Checks for columns with the same repeated value across all rows and returns a list of them.
+        Checks for columns with the same repeated value across all rows and returns two lists:
+        one with columns where the repeated value is 0 and another with columns where the
+        repeated value is not 0.
         
         Parameters:
         df (pd.DataFrame): The DataFrame to check.
 
         Returns:
-        list: A list of column names that have the same value across all rows.
+        tuple: A tuple containing two lists:
+            - Columns with the repeated value 0.
+            - Columns with the repeated value not 0.
         """
-        same_value_cols = [col for col in df.columns if df[col].nunique() == 1]
-        print('The following columns have repeated values across all rows: \n', same_value_cols)
-        print('Amount of cols with repeated values: ', len(same_value_cols))
-        return same_value_cols
+        zero_value_cols = []
+        non_zero_value_cols = []
+
+        for col in df.columns:
+            if df[col].nunique() == 1:
+                repeated_value = df[col].iloc[0]
+                if repeated_value == 0:
+                    zero_value_cols.append(col)
+                else:
+                    non_zero_value_cols.append(col)
+
+        # print('The following columns have repeated value 0 across all rows: \n', zero_value_cols)
+        # print('The following columns have repeated value not 0 across all rows: \n', non_zero_value_cols)
+        print('Amount of cols with repeated value zero: ', len(zero_value_cols))
+        print('Amount of cols with repeated value not zero: ', len(non_zero_value_cols))
+        
+        return zero_value_cols, non_zero_value_cols
+
     
 
     def get_lowest_variance_cols(self, df, threshold=0.01):
@@ -94,100 +112,83 @@ class HelperFunctions:
 
 class FeatureImportanceRF:
     """
-    The goal is to select the most imporant features in a dataset and evaluate this selection
+    Class to select the most important features in a dataset using Random Forest
+    and evaluate the selection.
     """
 
-    def __init__(self, X, y):
-
+    def __init__(self, X, y, n_estimators=100, test_size=0.2, threshold='median', random_state=42):
         self.X = X
         self.y = y
+        self.n_estimators = n_estimators
+        self.test_size = test_size
+        self.threshold = threshold
+        self.random_state = random_state
 
     def print_target_var_stats(self):
-
-        print(f' - Target variable stats:\nVar: {self.y.var()}, StDev: {self.y.std()}, IQR: {self.y.quantile(0.75) - self.y.quantile(0.25)}')
-        return None
+        print(f' - Target variable stats:\n'
+              f'   Var: {self.y.var()}, StDev: {self.y.std()}, '
+              f'IQR: {self.y.quantile(0.75) - self.y.quantile(0.25)}')
 
     def perform_train_test_split(self):
-        
-        X_train, X_test, y_train, y_test = train_test_split(self.X, self.y, test_size=0.2, random_state=42)
+        return train_test_split(self.X, self.y, test_size=self.test_size, random_state=self.random_state)
 
-        return X_train, X_test, y_train, y_test
-    
     def feature_selection_rf(self, X_train, X_test, y_train):
+        feature_selector = RandomForestRegressor(n_estimators=self.n_estimators, random_state=self.random_state)
+        feature_selector.fit(X_train, y_train)
 
-        # Ensure X_train and X_test are NumPy arrays to avoid warnings
-        X_train_array = X_train.values if hasattr(X_train, 'values') else np.array(X_train)
-        X_test_array = X_test.values if hasattr(X_test, 'values') else np.array(X_test)
-
-        # Perform feature selection using Random Forest
-        feature_selector = RandomForestRegressor(n_estimators=100, random_state = 42)
-        feature_selector.fit(X_train_array, y_train)
-
-        # Select most important features
-        selector = SelectFromModel(feature_selector, threshold='median')
-        X_train_selected = selector.transform(X_train_array)
-        X_test_selected = selector.transform(X_test_array)
+        selector = SelectFromModel(feature_selector, threshold=self.threshold)
+        X_train_selected = selector.transform(X_train)
+        X_test_selected = selector.transform(X_test)
 
         return X_train_selected, X_test_selected, feature_selector, selector
-    
+
     def evaluate_feature_selection_rf(self, X_train_selected, X_test_selected, y_train, y_test):
-
-        rf_model = RandomForestRegressor(n_estimators=100, random_state=42)
+        rf_model = RandomForestRegressor(n_estimators=self.n_estimators, random_state=self.random_state)
         rf_model.fit(X_train_selected, y_train)
-
-        # Evaluate the feature selection by evaluating the performances of the RF Regressor
         y_pred = rf_model.predict(X_test_selected)
 
         mse = mean_squared_error(y_test, y_pred)
         r2 = r2_score(y_test, y_pred)
-
         print("Evaluation Metrics:")
         print(f" - Mean Squared Error: {mse}")
         print(f" - R2 Score: {r2}")
-        
-        return None
 
-    def plot_important_features(self, X_train, selector, feature_selector):
+        return mse, r2
 
-        # Obtain the selected features to see which ones are the most important
+    def plot_important_features(self, X_train, selector, feature_selector, top_n=20):
         selected_features = selector.get_support(indices=True)
-
-        # Display feature importances for selected features
         importances = feature_selector.feature_importances_
         selected_importances = importances[selected_features]
 
-        # Obtain feature names
         feature_names = X_train.columns[selected_features] if hasattr(X_train, 'columns') else [f"Feature {i}" for i in selected_features]
 
-        # Create a DataFrame for importances
-        importance_df = pd.DataFrame({
-            'Feature': feature_names,
-            'Importance': selected_importances
-        })
+        importance_df = pd.DataFrame({'Feature': feature_names, 'Importance': selected_importances})
+        importance_df = importance_df.sort_values(by='Importance', ascending=False).head(top_n).reset_index(drop=True)
 
-        # Sort by importance and select top 20 features
-        importance_df = importance_df.sort_values(by='Importance', ascending=False).head(20)
-        importance_df.reset_index(drop=True, inplace=True)
-
-        # Plot the bar chart
         plt.figure(figsize=(12, 8))
-        plt.barh(importance_df['Feature'], importance_df['Importance'], color='royalblue')
+        plt.barh(importance_df['Feature'], importance_df['Importance'])
         plt.xlabel('Feature Importance')
-        plt.title('Top 20 Feature Importances')
-        plt.gca().invert_yaxis()  # To have the most important feature at the top
+        plt.title('Top Feature Importances')
+        plt.gca().invert_yaxis()
+        plt.grid(axis='x', linestyle='--', alpha=0.7)
         plt.show()
 
-        return feature_names
-    
-    def run_feature_selector(self):
+        return importance_df
 
+    def run_feature_selector(self):
         self.print_target_var_stats()
         X_train, X_test, y_train, y_test = self.perform_train_test_split()
-        X_train_selected, X_test_selected, feaure_selector, selector = self.feature_selection_rf(X_train, X_test, y_train)
-        self.evaluate_feature_selection_rf(X_train_selected, X_test_selected, y_train, y_test)
-        feature_names = self.plot_important_features(X_train, selector, feaure_selector)
+        X_train_selected, X_test_selected, feature_selector, selector = self.feature_selection_rf(X_train, X_test, y_train)
+        mse, r2 = self.evaluate_feature_selection_rf(X_train_selected, X_test_selected, y_train, y_test)
+        feature_importances = self.plot_important_features(X_train, selector, feature_selector)
 
-        return feature_names
+        return {
+            'X_train_selected': X_train_selected,
+            'X_test_selected': X_test_selected,
+            'mse': mse,
+            'r2': r2,
+            'feature_importances': feature_importances
+        }
 
 
 
