@@ -1,13 +1,14 @@
 import pandas as pd
 import os
 from sklearn.ensemble import IsolationForest, RandomForestRegressor
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.metrics import mean_squared_error, r2_score
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler, RobustScaler
 from sklearn.feature_selection import SelectFromModel
 import numpy as np
 import matplotlib.pyplot as plt
+import xgboost as xgb
 
 class EDAHelperFunctions:
 
@@ -110,29 +111,41 @@ class EDAHelperFunctions:
 
         return df_capped
 
-class FeatureImportanceRF:
+class TreeRegressionModels:
     """
-    Class to select the most important features in a dataset using Random Forest
-    and evaluate the selection.
+    Class to train tree-based regression models with feature selection.
     """
 
-    def __init__(self, X, y, n_estimators=100, test_size=0.2, threshold='median', random_state=42):
+    def __init__(self, X, y, model_type='random_forest', n_estimators=100, test_size=0.2, threshold=0.01, random_state=42):
+        """
+        :param X: Feature matrix
+        :param y: Target variable
+        :param model_type: Model type ('random_forest' or 'boosting')
+        :param n_estimators: Number of estimators (trees)
+        :param test_size: Proportion of data for testing
+        :param threshold: Threshold for feature selection
+        :param random_state: Random seed
+        """
         self.X = X
         self.y = y
+        self.model_type = model_type
         self.n_estimators = n_estimators
         self.test_size = test_size
         self.threshold = threshold
         self.random_state = random_state
 
     def print_target_var_stats(self):
+        """Print basic statistics about the target variable."""
         print(f' - Target variable stats:\n'
               f'   Var: {self.y.var()}, StDev: {self.y.std()}, '
               f'IQR: {self.y.quantile(0.75) - self.y.quantile(0.25)}')
 
     def perform_train_test_split(self):
+        """Split data into training and testing sets."""
         return train_test_split(self.X, self.y, test_size=self.test_size, random_state=self.random_state)
 
     def feature_selection_rf(self, X_train, X_test, y_train):
+        """Perform feature selection using Random Forest."""
         feature_selector = RandomForestRegressor(n_estimators=self.n_estimators, random_state=self.random_state)
         feature_selector.fit(X_train, y_train)
 
@@ -142,10 +155,17 @@ class FeatureImportanceRF:
 
         return X_train_selected, X_test_selected, feature_selector, selector
 
-    def evaluate_feature_selection_rf(self, X_train_selected, X_test_selected, y_train, y_test):
-        rf_model = RandomForestRegressor(n_estimators=self.n_estimators, random_state=self.random_state)
-        rf_model.fit(X_train_selected, y_train)
-        y_pred = rf_model.predict(X_test_selected)
+    def evaluate_model(self, X_train, X_test, y_train, y_test):
+        """Train and evaluate the selected model."""
+        if self.model_type == 'random_forest':
+            model = RandomForestRegressor(n_estimators=self.n_estimators, random_state=self.random_state)
+        elif self.model_type == 'boosting':
+            model = xgb.XGBRegressor(n_estimators=self.n_estimators, random_state=self.random_state)
+        else:
+            raise ValueError("Invalid model_type. Choose 'random_forest' or 'boosting'.")
+
+        model.fit(X_train, y_train)
+        y_pred = model.predict(X_test)
 
         mse = mean_squared_error(y_test, y_pred)
         r2 = r2_score(y_test, y_pred)
@@ -153,9 +173,29 @@ class FeatureImportanceRF:
         print(f" - Mean Squared Error: {mse}")
         print(f" - R2 Score: {r2}")
 
-        return mse, r2
+        return mse, r2, model
+
+    def hyperparameter_tuning_rf(self, X_train_selected, y_train):
+        """
+        Perform hyperparameter tuning for Random Forest using selected features.
+        :param X_train_selected: Feature-selected training set
+        :param y_train: Target training set
+        """
+        param_grid = {
+            'n_estimators': [100, 200, 500],
+            'max_depth': [10, 20, 50],
+            'max_features': ['sqrt', 'log2'],
+            'min_samples_split': [2, 5, 10],
+            'min_samples_leaf': [1, 2, 5]
+        }
+        grid_search = GridSearchCV(RandomForestRegressor(random_state=self.random_state), param_grid, cv=5, scoring='neg_mean_squared_error')
+        grid_search.fit(X_train_selected, y_train)
+
+        print("Best Parameters for Random Forest:", grid_search.best_params_)
+        return grid_search.best_estimator_
 
     def plot_important_features(self, X_train, selector, feature_selector, top_n=20):
+        """Plot the most important features."""
         selected_features = selector.get_support(indices=True)
         importances = feature_selector.feature_importances_
         selected_importances = importances[selected_features]
@@ -176,10 +216,20 @@ class FeatureImportanceRF:
         return importance_df
 
     def run_feature_selector(self):
+        """Run the full feature selection and evaluation pipeline."""
         self.print_target_var_stats()
         X_train, X_test, y_train, y_test = self.perform_train_test_split()
+
+        # Feature selection using Random Forest
         X_train_selected, X_test_selected, feature_selector, selector = self.feature_selection_rf(X_train, X_test, y_train)
-        mse, r2 = self.evaluate_feature_selection_rf(X_train_selected, X_test_selected, y_train, y_test)
+
+        # Hyperparameter tuning with selected features
+        # tuned_model = self.hyperparameter_tuning_rf(X_train_selected, y_train)
+
+        # Evaluate the chosen model
+        mse, r2, model = self.evaluate_model(X_train_selected, X_test_selected, y_train, y_test)
+
+        # Plot feature importances
         feature_importances = self.plot_important_features(X_train, selector, feature_selector)
 
         return {
@@ -188,12 +238,5 @@ class FeatureImportanceRF:
             'mse': mse,
             'r2': r2,
             'feature_importances': feature_importances
+            # 'model': tuned_model
         }
-
-
-
-
-    
-                
-
-        
