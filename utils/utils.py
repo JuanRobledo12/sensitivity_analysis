@@ -111,7 +111,8 @@ class EDAHelperFunctions:
 
         return df_capped
     
-    def check_values_in_range_with_metrics(self, csv_path, sample_df):
+
+    def analyze_edgar_values(self, csv_path, sample_df):
         # Load the CSV file
         df = pd.read_csv(csv_path)
         
@@ -121,65 +122,59 @@ class EDAHelperFunctions:
         # Iterate over each row in the CSV
         for index, row in df.iterrows():
             subsector = row['Subsector']
-            simulation_value = row['simulation']
             edgar_value = row['Edgar_value']
 
             # Construct the corresponding column name in the sample DataFrame
-            sample_col_simulation = f"emission_co2e_subsector_total_{subsector}"
+            sample_col = f"emission_co2e_subsector_total_{subsector}"
             
             # Check if the column exists in the sample DataFrame
-            if sample_col_simulation in sample_df.columns:
+            if sample_col in sample_df.columns:
                 # Get the sample data for the column
-                sample_data = sample_df[sample_col_simulation]
+                sample_data = sample_df[sample_col]
 
                 # Get the range of the column
                 col_min = sample_data.min()
                 col_max = sample_data.max()
 
-                # Check if simulation and Edgar values fall in the range
-                simulation_in_range = col_min <= simulation_value <= col_max
+                # Check if Edgar value falls in the range
                 edgar_in_range = col_min <= edgar_value <= col_max
 
                 # Compute metrics
-                median = sample_data.median()
-                simulation_deviation_from_median = abs(simulation_value - median)
-                edgar_deviation_from_median = abs(edgar_value - median)
-                
-                simulation_percentile = percentileofscore(sample_data, simulation_value)
+                median_simulated = sample_data.median()
+                edgar_deviation_from_median = abs(edgar_value - median_simulated)
                 edgar_percentile = percentileofscore(sample_data, edgar_value)
 
                 # Append the results
                 results.append({
                     "Subsector": subsector,
-                    "Simulation_In_Range": simulation_in_range,
                     "Edgar_In_Range": edgar_in_range,
-                    "Simulation_Deviation_From_Median": simulation_deviation_from_median,
                     "Edgar_Deviation_From_Median": edgar_deviation_from_median,
-                    "Simulation_Percentile": simulation_percentile,
-                    "Edgar_Percentile": edgar_percentile
+                    "Edgar_Percentile": edgar_percentile,
+                    "Median_Simulated": median_simulated,
+                    "Edgar_Value": edgar_value
                 })
             else:
-                # If the column does not exist, log as False
+                # If the column does not exist, log default values
                 results.append({
                     "Subsector": subsector,
-                    "Simulation_In_Range": False,
                     "Edgar_In_Range": False,
-                    "Simulation_Deviation_From_Median": None,
                     "Edgar_Deviation_From_Median": None,
-                    "Simulation_Percentile": None,
-                    "Edgar_Percentile": None
+                    "Edgar_Percentile": None,
+                    "Median_Simulated": None,
+                    "Edgar_Value": edgar_value
                 })
 
         # Convert results to DataFrame for easier analysis
         results_df = pd.DataFrame(results)
         return results_df
 
+
 class TreeRegressionModels:
     """
     Class to train tree-based regression models with feature selection.
     """
 
-    def __init__(self, X, y, model_type='random_forest', n_estimators=100, test_size=0.2, threshold=0.01, random_state=42):
+    def __init__(self, X, y, model_type='random_forest', n_estimators=100, test_size=0.2, threshold=0.01, random_state=42, plot_flag=False):
         """
         :param X: Feature matrix
         :param y: Target variable
@@ -191,6 +186,7 @@ class TreeRegressionModels:
         """
         self.X = X
         self.y = y
+        self.plot_flag = plot_flag
         self.model_type = model_type
         self.n_estimators = n_estimators
         self.test_size = test_size
@@ -211,8 +207,9 @@ class TreeRegressionModels:
         """Perform feature selection using Random Forest."""
         feature_selector = RandomForestRegressor(n_estimators=self.n_estimators, random_state=self.random_state)
         feature_selector.fit(X_train, y_train)
-
-        selector = SelectFromModel(feature_selector, threshold=self.threshold)
+        
+        print('SelectFromModel executing...')
+        selector = SelectFromModel(feature_selector, threshold=self.threshold, max_features=20)
         X_train_selected = selector.transform(X_train)
         X_test_selected = selector.transform(X_test)
 
@@ -268,13 +265,15 @@ class TreeRegressionModels:
         importance_df = pd.DataFrame({'Feature': feature_names, 'Importance': selected_importances})
         importance_df = importance_df.sort_values(by='Importance', ascending=False).head(top_n).reset_index(drop=True)
 
-        plt.figure(figsize=(12, 8))
-        plt.barh(importance_df['Feature'], importance_df['Importance'])
-        plt.xlabel('Feature Importance')
-        plt.title('Top Feature Importances')
-        plt.gca().invert_yaxis()
-        plt.grid(axis='x', linestyle='--', alpha=0.7)
-        plt.show()
+        if self.plot_flag:
+            
+            plt.figure(figsize=(12, 8))
+            plt.barh(importance_df['Feature'], importance_df['Importance'])
+            plt.xlabel('Feature Importance')
+            plt.title('Top Feature Importances')
+            plt.gca().invert_yaxis()
+            plt.grid(axis='x', linestyle='--', alpha=0.7)
+            plt.show()
 
         return importance_df
 
@@ -284,13 +283,15 @@ class TreeRegressionModels:
         X_train, X_test, y_train, y_test = self.perform_train_test_split()
 
         # Feature selection using Random Forest
+        print('Performing feature selection')
         X_train_selected, X_test_selected, feature_selector, selector = self.feature_selection_rf(X_train, X_test, y_train)
 
         # Hyperparameter tuning with selected features
         # tuned_model = self.hyperparameter_tuning_rf(X_train_selected, y_train)
 
         # Evaluate the chosen model
-        mse, r2, model = self.evaluate_model(X_train_selected, X_test_selected, y_train, y_test)
+        print('Evaluating the model')
+        # mse, r2, model = self.evaluate_model(X_train_selected, X_test_selected, y_train, y_test)
 
         # Plot feature importances
         feature_importances = self.plot_important_features(X_train, selector, feature_selector)
@@ -298,8 +299,8 @@ class TreeRegressionModels:
         return {
             'X_train_selected': X_train_selected,
             'X_test_selected': X_test_selected,
-            'mse': mse,
-            'r2': r2,
+            # 'mse': mse,
+            # 'r2': r2,
             'feature_importances': feature_importances
             # 'model': tuned_model
         }
