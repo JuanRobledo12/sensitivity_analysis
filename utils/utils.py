@@ -132,41 +132,38 @@ class EDAHelperFunctions:
                 # Get the sample data for the column
                 sample_data = sample_df[sample_col]
 
-                # Get the range of the column
+                # Compute range and distribution metrics
                 col_min = sample_data.min()
                 col_max = sample_data.max()
+                col_median = sample_data.median()
+                q1 = sample_data.quantile(0.25)
+                q3 = sample_data.quantile(0.75)
+                iqr = q3 - q1
 
                 # Check if Edgar value falls in the range
                 edgar_in_range = col_min <= edgar_value <= col_max
 
                 # Compute metrics
-                median_simulated = sample_data.median()
-                edgar_deviation_from_median = abs(edgar_value - median_simulated)
+                edgar_deviation_from_median = abs(edgar_value - col_median)
                 edgar_percentile = percentileofscore(sample_data, edgar_value)
 
                 # Append the results
                 results.append({
                     "Subsector": subsector,
-                    "Edgar_In_Range": edgar_in_range,
+                    "Edgar_Value": edgar_value,
+                    "Median_Simulated": col_median,
                     "Edgar_Deviation_From_Median": edgar_deviation_from_median,
                     "Edgar_Percentile": edgar_percentile,
-                    "Median_Simulated": median_simulated,
-                    "Edgar_Value": edgar_value
-                })
-            else:
-                # If the column does not exist, log default values
-                results.append({
-                    "Subsector": subsector,
-                    "Edgar_In_Range": False,
-                    "Edgar_Deviation_From_Median": None,
-                    "Edgar_Percentile": None,
-                    "Median_Simulated": None,
-                    "Edgar_Value": edgar_value
+                    "Edgar_In_Range": edgar_in_range,
+                    "Q1_Simulated": q1,
+                    "Q3_Simulated": q3,
+                    "IQR_Simulated": iqr
                 })
 
         # Convert results to DataFrame for easier analysis
         results_df = pd.DataFrame(results)
         return results_df
+
 
 
 class TreeRegressionModels:
