@@ -9,7 +9,7 @@ from sklearn.feature_selection import SelectFromModel
 import numpy as np
 import matplotlib.pyplot as plt
 import xgboost as xgb
-
+from scipy.stats import percentileofscore, zscore
 class EDAHelperFunctions:
 
     def __init__(self) -> None:
@@ -110,6 +110,69 @@ class EDAHelperFunctions:
             df_capped[column] = df_capped[column].apply(lambda x: min(x, upper_bound))
 
         return df_capped
+    
+    def check_values_in_range_with_metrics(self, csv_path, sample_df):
+        # Load the CSV file
+        df = pd.read_csv(csv_path)
+        
+        # Prepare the results
+        results = []
+
+        # Iterate over each row in the CSV
+        for index, row in df.iterrows():
+            subsector = row['Subsector']
+            simulation_value = row['simulation']
+            edgar_value = row['Edgar_value']
+
+            # Construct the corresponding column name in the sample DataFrame
+            sample_col_simulation = f"emission_co2e_subsector_total_{subsector}"
+            
+            # Check if the column exists in the sample DataFrame
+            if sample_col_simulation in sample_df.columns:
+                # Get the sample data for the column
+                sample_data = sample_df[sample_col_simulation]
+
+                # Get the range of the column
+                col_min = sample_data.min()
+                col_max = sample_data.max()
+
+                # Check if simulation and Edgar values fall in the range
+                simulation_in_range = col_min <= simulation_value <= col_max
+                edgar_in_range = col_min <= edgar_value <= col_max
+
+                # Compute metrics
+                median = sample_data.median()
+                simulation_deviation_from_median = abs(simulation_value - median)
+                edgar_deviation_from_median = abs(edgar_value - median)
+                
+                simulation_percentile = percentileofscore(sample_data, simulation_value)
+                edgar_percentile = percentileofscore(sample_data, edgar_value)
+
+                # Append the results
+                results.append({
+                    "Subsector": subsector,
+                    "Simulation_In_Range": simulation_in_range,
+                    "Edgar_In_Range": edgar_in_range,
+                    "Simulation_Deviation_From_Median": simulation_deviation_from_median,
+                    "Edgar_Deviation_From_Median": edgar_deviation_from_median,
+                    "Simulation_Percentile": simulation_percentile,
+                    "Edgar_Percentile": edgar_percentile
+                })
+            else:
+                # If the column does not exist, log as False
+                results.append({
+                    "Subsector": subsector,
+                    "Simulation_In_Range": False,
+                    "Edgar_In_Range": False,
+                    "Simulation_Deviation_From_Median": None,
+                    "Edgar_Deviation_From_Median": None,
+                    "Simulation_Percentile": None,
+                    "Edgar_Percentile": None
+                })
+
+        # Convert results to DataFrame for easier analysis
+        results_df = pd.DataFrame(results)
+        return results_df
 
 class TreeRegressionModels:
     """
